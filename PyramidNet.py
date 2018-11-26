@@ -3,8 +3,8 @@ from __future__ import division
 from __future__ import print_function
 import tensorflow as tf
 import numpy as np
+import math
 import os
-os.environ['TF_CPP_MIN_LEVEL'] = '2'
 
 
 class PyramidNet:
@@ -19,13 +19,11 @@ class PyramidNet:
 
         self.config = config
         self.is_bottleneck = config['is_bottleneck']
-        # assert config['alpha'] % np.sum(config['residual_block_list']) == 0
         self.block_list = config['residual_block_list']
         self.downsampling_list = [np.sum(self.block_list[:i+1]) for i in range(len(self.block_list))]
         alpha = config['alpha']
         total_units = np.sum(self.block_list)
-        self.filters_list = [config['init_conv_filters'] + (i+1) * alpha // total_units for i in range(total_units)]
-
+        self.filters_list = [config['init_conv_filters']+(i+1)*alpha//total_units for i in range(total_units)]
         self.global_step = tf.train.get_or_create_global_step()
         self.is_training = True
 
@@ -76,7 +74,9 @@ class PyramidNet:
                     residual_block = stack_residual_unit_fn(residual_block, self.filters_list[i], 2, 'block'+str(j+1)+'_unit'+str(i+1), filters_list[i])
 
             residual_block = tf.nn.relu(residual_block)
-
+        with tf.variable_scope('after_spliting'):
+            bn = self._bn(residual_block)
+            relu = tf.nn.relu(bn)
         with tf.variable_scope('final_dense'):
             axes = [1, 2] if self.data_format == 'channels_last' else [2, 3]
             global_pool = tf.reduce_mean(residual_block, axis=axes, keepdims=False, name='global_pool')
@@ -171,6 +171,14 @@ class PyramidNet:
         else:
             raise FileNotFoundError('Not Found Model File!')
 
+    def _bn(self, bottom):
+        bn = tf.layers.batch_normalization(
+            inputs=bottom,
+            axis=3 if self.data_format == 'channels_last' else 1,
+            training=self.is_training
+        )
+        return bn
+
     def _conv_bn_activation(self, bottom, filters, kernel_size, strides, activation=tf.nn.relu):
         conv = tf.layers.conv2d(
             inputs=bottom,
@@ -181,22 +189,14 @@ class PyramidNet:
             data_format=self.data_format,
             kernel_initializer=tf.contrib.layers.variance_scaling_initializer()
         )
-        bn = tf.layers.batch_normalization(
-            inputs=conv,
-            axis=3 if self.data_format == 'channels_last' else 1,
-            training=self.is_training
-        )
+        bn = self._bn(conv)
         if activation is not None:
             return activation(bn)
         else:
             return bn
 
     def _bn_activation_conv(self, bottom, filters, kernel_size, strides, activation=tf.nn.relu):
-        bn = tf.layers.batch_normalization(
-            inputs=bottom,
-            axis=3 if self.data_format == 'channels_last' else 1,
-            training=self.is_training
-        )
+        bn = self._bn(bottom)
         if activation is not None:
             bn = activation(bn)
         conv = tf.layers.conv2d(
@@ -214,11 +214,11 @@ class PyramidNet:
         with tf.variable_scope(scope):
             conv = self._bn_activation_conv(bottom, filters, 3, strides, None)
             conv = self._bn_activation_conv(conv, filters, 3, 1)
-            if strides != 1:
-                shutcut = self._avg_pooling(bottom, strides, strides, 'avg_pool')
+            shutcut = self._avg_pooling(bottom, strides, strides, 'avg_pool')
+            if self.data_format == 'channels_last':
                 shutcut = tf.pad(shutcut, [[0, 0], [0, 0], [0, 0], [0, filters-input_filters]])
             else:
-                shutcut = tf.pad(bottom, [[0, 0], [0, 0], [0, 0], [0, filters-input_filters]])
+                shutcut = tf.pad(shutcut, [[0, 0],  [0, filters-input_filters], [0, 0], [0, 0]])
             return conv + shutcut
 
     def _residual_bottleneck(self, bottom, filters, strides, scope, input_filters):
