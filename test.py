@@ -33,9 +33,9 @@ num_test = 10000
 num_classes = 10
 train_batch_size = 128
 test_batch_size = 200
-epochs = 200
+epochs = 300
 weight_decay = 1e-4
-lr = 0.01
+lr = 0.1
 
 (x_train, y_train), (x_test, y_test) = cifar10.load_data()
 y_train = keras.utils.to_categorical(y_train, num_classes)
@@ -49,7 +49,7 @@ train_gen = ImageDataGenerator(
 ).flow(x_train, y_train, batch_size=train_batch_size)
 test_gen = ImageDataGenerator().flow(x_test, y_test, batch_size=test_batch_size)
 
-reduce_lr_epoch = [25, 125]
+reduce_lr_epoch = [150, 225]
 testnet = net.PyramidNet(config, data_shape, num_classes, weight_decay, 'channels_last')
 for epoch in range(epochs):
     print('-'*20, 'epoch', epoch, '-'*20)
